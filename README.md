@@ -8,3 +8,4 @@ Enhancement on the previous BioAcousticTransformer, including unsupervised pre-t
 4. Semi-supervised pretraining
 5. Use GPS and time for prediction
 6. Create GUI
+7. Try other datasets
