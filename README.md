@@ -2,9 +2,10 @@
 Enhancement on the previous BioAcousticTransformer, including unsupervised pre-training, augmentation, manual label smoothing, GPS and time data.
 
 # To Do
-- Augmentation, manual label smoothing
+- Augmentation (noise, masking)
+- Manual label smoothing
 - Prepare data from UFS
 - Semi-supervised pretraining
-- Use GPS and time for prediction (multi-branch or seperate networks)
+- Use location, time, altitude, weather, geo data (multi-branch or seperate networks)
 - Create GUI
 - Try other datasets
