@@ -20,19 +20,19 @@ def slideWindow(a, size, step):
     return b
     
 def prepareSet(prepared_set, labels, patch_len, patch_skip):
-    X_ind = []
-    Y_ind = []
+    X = []
+    Y = []
 
     for species in tqdm(list(labels)):
-        S_db = np.asarray(prepared_set.get(species))
+        signal = np.asarray(prepared_set.get(species))
         label = labels[species]
 
-        patches = slideWindow(S_db, patch_len, patch_skip)[:-1] # last one is not full
-        X_ind.extend(patches)
-        Y_ind.extend([label] * len(patches))
+        patches = slideWindow(signal, patch_len, patch_skip)[:-1] # last one is not full
+        X.extend(patches)
+        Y.extend([label] * len(patches))
     
-    X_ind, Y_ind = shuffle(X_ind, Y_ind, random_state=42)
-    return np.asarray(X_ind), np.asarray(Y_ind)
+    X, Y = shuffle(X, Y, random_state=42)
+    return np.asarray(X), np.asarray(Y)
 
 def prepare(file, labels, patch_len, patch_skip):
     prepared_hf = h5py.File(file, 'r')
@@ -52,7 +52,7 @@ def rand_y(Y, exclude_class):
             return idx
 
 # X and Y need to be shuffled
-def mixup(X, Y, num_classes, min_seq=2, max_seq=2):
+def mixup(X, Y, num_classes, min_seq=2, max_seq=2, p_min=1.0, p_max=1.0):
     Y1 = one_hot(Y, num_classes, device=X.device)
     X2 = X.clone()
     Y2 = Y1.clone()
@@ -60,18 +60,27 @@ def mixup(X, Y, num_classes, min_seq=2, max_seq=2):
         rand_k = random.randint(min_seq, max_seq)
         for k in range(rand_k-1):
             idx = rand_y(Y1, Y2[i])
-            X2[i] += X[idx]
+            p = random.uniform(p_min, p_max)
+            X2[i] += p * X[idx]
             Y2[i] += Y1[idx]
         X2[i] /= rand_k
     return X2, Y2
 
-def getCorrects(output, target):
-    n_targets = target.sum(dim=1).int().cpu().detach().numpy()
-    best_2 = torch.zeros_like(output)
-    for i, e in enumerate(torch.argsort(output, 1)):
-        best_2[i, e[-n_targets[i]:]] = 1
-    log_and = torch.logical_and(best_2, target)
+def preprocess(x, n_fft=512):
+    x = torch.abs(torch.stft(x, n_fft=n_fft, window=torch.hann_window(window_length=n_fft).to(x.device), return_complex=True)) # FFT
+    x = 20 * torch.log10(x / torch.max(x) + 1e-10) # amplitude to db
+    x = torch.abs(x - x.mean(dim=2, keepdim=True).repeat((1, 1, x.shape[2]))) # noise filter
+    x = x.transpose(dim0=2, dim1=1)
+    x /= x.amax(1, keepdim=True).amax(2, keepdim=True) # normalize spectrograms between 0 and 1
+    return x
+
+def noise(x, std=0.05):
+    x += std * torch.randn(x.shape).to(x.device)
+    return x
+
+def getCorrects(output, target, threshold=0.5):
+    log_and = torch.logical_and(output > threshold, target > threshold)
     corr = 0.0
     for i, t in enumerate(target):
-        corr += log_and[i].sum() / max(t.sum(), output[i].sum())
+        corr += log_and[i].sum() / max((t > threshold).sum(), (output[i] > threshold).sum())
     return corr
