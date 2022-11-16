@@ -4,7 +4,7 @@ Enhancement on the previous BioAcousticTransformer, including unsupervised pre-t
 # To Do
 - Augmentation (noise, masking)
     - SpecAugment: https://arxiv.org/abs/1904.08779
-- Manual label smoothing
+- Species-Label-Smoothing
 - Prepare data from UFS
 - Semi-supervised pretraining
     - DINO: https://arxiv.org/pdf/2104.14294
