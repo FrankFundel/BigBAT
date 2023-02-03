@@ -12,6 +12,7 @@ class BigBAT(nn.Module):
         d_model, # must equal to patch_embedding output dim
         num_classes,
         patch_embedding,
+        use_cls,
         nhead=2,
         dim_feedforward=32,
         num_layers=2,
@@ -25,7 +26,8 @@ class BigBAT(nn.Module):
         
         self.patch_len = patch_len
         self.patch_skip = patch_skip
-        self.to_patch_embedding = patch_embedding
+        self.patch_embedding = patch_embedding
+        self.use_cls = use_cls
     
         self.cls_token = nn.Parameter(torch.randn(1, 1, d_model))
         self.pos_encoder = nn.Parameter(torch.randn(1, max_len + 1, d_model))
@@ -45,11 +47,11 @@ class BigBAT(nn.Module):
         self.d_model = d_model
 
     def forward(self, x):
-        x = x.unfold(dimension=1, size=self.patch_len, step=self.patch_skip).permute((0, 1, 3, 2)) # patches
+        x = x.unfold(dimension=1, size=self.patch_len, step=self.patch_skip).transpose(3, 2) # patches
     
         b, n, w, h = x.shape
         x = x.reshape((b * n, 1, w, h))
-        x = self.to_patch_embedding(x)
+        x = self.patch_embedding(x)
         x = x.reshape((b, n, self.d_model))
         
         #cls = einops.repeat(self.cls_token, '1 n d -> b n d', b=b)
@@ -60,6 +62,9 @@ class BigBAT(nn.Module):
         x = self.dropout(x)
         x = self.transformer_encoder(x)
         
-        x = x[:, 0]
+        if self.use_cls:
+            x = x[:, 0]
+        else:
+            x = torch.mean(x[:, 1:], 1)
         x = self.classifier(x)
         return x
