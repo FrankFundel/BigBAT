@@ -1,6 +1,7 @@
 # BigBAT
 Enhancement on the previous BioAcousticTransformer, including unsupervised pre-training, augmentation, species label smoothing and meta data.
 
+<<<<<<< HEAD
 # Content
 - ASL.py: AsymmetricLoss Function
 - Transformer.py: ViT Architecture
@@ -47,5 +48,3 @@ min_seqs = 100
 
 data_path = "prepared_signal.h5"
 X_train, Y_train, X_test, Y_test, X_val, Y_val = prepare(data_path, classes, seq_len, seq_skip, max_seqs, min_seqs)
-
-This splits the concatenated recording into equal windows with overlap. Since the data is still in samples and not spectrogram, we use samples_per_step to calculate the samples in each sequence.
