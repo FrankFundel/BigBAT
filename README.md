@@ -1,7 +1,6 @@
 # BigBAT
 Enhancement on the previous BioAcousticTransformer, including unsupervised pre-training, augmentation, species label smoothing and meta data.
 
-<<<<<<< HEAD
 # Content
 - ASL.py: AsymmetricLoss Function
 - Transformer.py: ViT Architecture
