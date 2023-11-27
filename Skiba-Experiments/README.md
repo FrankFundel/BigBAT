@@ -1,2 +1,2 @@
-Skiba-main: Trains the BigBAT model on the Skiba dataset, optionally with pretrained model
-Skiba-\[model\]: Trains \[model\] on Skiba dataset, optionally with pretrained model
+- Skiba-main: Trains the BigBAT model on the Skiba dataset, optionally with pretrained model
+- Skiba-\[model\]: Trains \[model\] on Skiba dataset, optionally with pretrained model

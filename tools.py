@@ -6,15 +6,6 @@ from sklearn.utils import shuffle
 import torch
 import math
 
-def slideWindow2(a, size, step):
-    b = []
-    pos = 0
-    while pos + size < len(a):
-        tile = a[pos : pos + size]
-        b.append(tile)
-        pos += size
-    return b
-
 def slideWindow(a, size, step):
     corr_size = list(a.shape)
     corr_size[0] = math.ceil(corr_size[0] / step) * step
