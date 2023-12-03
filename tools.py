@@ -4,6 +4,7 @@ from tqdm import tqdm
 import numpy as np
 from sklearn.utils import shuffle
 import torch
+import torch.nn as nn
 import math
 
 def slideWindow(a, size, step):
@@ -30,13 +31,19 @@ def prepareSet(group, labels, patch_len, patch_skip, max_seqs=None, min_seqs=Non
         for s in species.split(','):
             if s in labels:
                 label[labels[s]] = 1
-        ma = torch.all(spec_count[torch.nonzero(label)] < max_seqs) # all labels have less then max
-        mi = torch.any(spec_count[torch.nonzero(label)] < min_seqs) # one label has less than min
-        if label.sum() > 0 and len(signal) > 0 and (mi or ma):
-            patches = slideWindow(signal, patch_len, patch_skip)
-            X.extend(patches)
-            Y.extend([label] * len(patches))
-            spec_count += label * len(patches)
+        if max_seqs is not None and min_seqs is not None:
+            ma = torch.all(spec_count[torch.nonzero(label)] < max_seqs) # all labels have less then max
+            mi = torch.any(spec_count[torch.nonzero(label)] < min_seqs) # one label has less than min
+            if label.sum() > 0 and len(signal) > 0 and (mi or ma):
+                patches = slideWindow(signal, patch_len, patch_skip)
+                X.extend(patches)
+                Y.extend([label] * len(patches))
+                spec_count += label * len(patches)
+        else:
+                patches = slideWindow(signal, patch_len, patch_skip)
+                X.extend(patches)
+                Y.extend([label] * len(patches))
+            
     
     X, Y = shuffle(X, Y, random_state=42)
     return torch.stack(X), torch.stack(Y)
@@ -119,3 +126,13 @@ def getCorrects(output, target, threshold=0.5):
     for i, t in enumerate(target):
         corr += log_and[i].sum() / max((t > threshold).sum(), (output[i] > threshold).sum())
     return corr
+
+class RandomApply(nn.Module):
+    def __init__(self, fn, p):
+        super().__init__()
+        self.fn = fn
+        self.p = p
+    def forward(self, x):
+        if random.random() > self.p:
+            return x
+        return self.fn(x)

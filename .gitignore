@@ -6,5 +6,6 @@ __pycache__
 data
 *.csv
 *.zip
-test.py
-Gibbons_data
+*.h5
+*.json
+

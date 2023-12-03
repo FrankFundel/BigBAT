@@ -1,19 +1,24 @@
 import argparse
 import json
-import tqdm
 import wandb
 import time
 import numpy as np
 import matplotlib.pyplot as plt
 from sklearn.metrics import f1_score, multilabel_confusion_matrix, ConfusionMatrixDisplay
+from tqdm import tqdm
+from byol_pytorch import BYOL
 
 import torch
 import torch.nn as nn
 from torch.utils.data import TensorDataset, DataLoader
+import torchvision.transforms as T
 
 from ASL import AsymmetricLoss
 from BigBAT import BigBAT
-from tools import prepare, mixup, preprocess, noise, getCorrects
+from tools import prepare, mixup, preprocess, noise, getCorrects, RandomApply
+from byol import byol_train_epoch
+from fixmatch import consistency_loss, fixmatch_train_epoch
+from pseudolabel import AlphaWeight, pl_train_epoch
 
 # Function to load classes from JSON file
 def load_classes_from_json(json_file_path):
@@ -23,8 +28,8 @@ def load_classes_from_json(json_file_path):
     return classes_list, classes
 
 # Create argument parser
-parser = argparse.ArgumentParser(description="Load class names from a JSON file (array).")
-parser.add_argument('json_file', type=str, help="Path to the JSON file containing class names.")
+parser = argparse.ArgumentParser(description="Train BigBAT easily on custom datasets.")
+parser.add_argument('json_file', type=str, help="Path to the JSON file containing class names (array).")
 parser.add_argument('--nfft', type=int, default=512, help="Number of FFT points")
 parser.add_argument('--max_len', type=int, default=60, help="Maximum length")
 parser.add_argument('--patch_len', type=int, default=44, help="Patch length")
@@ -36,12 +41,18 @@ parser.add_argument('--holdout', type=float, default=0, help="Proportion of data
 parser.add_argument('--batch_size', type=int, default=128, help="Batch size")
 parser.add_argument('--epochs', type=int, default=15, help="Number of epochs")
 parser.add_argument('--lr', type=float, default=0.001, help="Learning rate")
-parser.add_argument('--warmup_epochs', type=int, default=5, help="Number of warm-up epochs")
+parser.add_argument('--warmup_epochs', type=int, default=3, help="Number of warm-up epochs")
 parser.add_argument('--wandb_project', type=str, default="BigBAT-UFS", help="Weights & Biases project name")
 parser.add_argument('--wandb_entity', type=str, default="frankfundel", help="Weights & Biases entity name")
 parser.add_argument('--model_filename', type=str, default='BigBAT.pth', help="Filename for the saved model")
 parser.add_argument('--repeats', type=int, default=5, help="Number of repeats for evaluation")
 parser.add_argument('--figure_filename', type=str, default='confusion_matrix.png', help="Filename for saving the confusion matrix figure")
+parser.add_argument('--method', type=str, default='standard', choices=['standard', 'BYOL', 'FixMatch', 'PseudoLabel'], help="The method of training. Needs to be done in combination of --holdout > 0")
+parser.add_argument('--T1', type=int, default=1, help="At what epoch unlabeled data is introduce.?")
+parser.add_argument('--T2', type=int, default=6, help="At what epoch unlabeled is unintroduced.")
+parser.add_argument('--every_n', type=int, default=10, help="Every n batches, use unlabled data.")
+parser.add_argument('--no_mixup', action='store_true', help="If mixup should not be used.")
+parser.add_argument('--lambda_u', type=float, default=1.0, help="Weight of unlabeled loss in FixMatch.")
 
 # Parse arguments
 args = parser.parse_args()
@@ -61,6 +72,9 @@ wandb_entity = args.wandb_entity
 model_filename = args.model_filename
 repeats = args.repeats
 figure_filename = args.figure_filename
+method = args.method
+holdout = args.holdout
+no_mixup = args.no_mixup
 
 # Initializing
 classes_list, classes = load_classes_from_json(args.json_file)
@@ -70,6 +84,7 @@ samples_per_step = patch_skip * (nfft // 4)
 seq_len = (max_len + 1) * samples_per_step
 seq_skip = seq_len // 4
 
+print("Loading data...")
 X_train, Y_train, X_test, Y_test, X_val, Y_val = prepare(data_path, classes, seq_len, seq_skip, max_seqs, min_seqs)
 
 print("Total sequences:", len(X_train) + len(X_test) + len(X_val))
@@ -78,9 +93,10 @@ print("Test sequences:", X_test.shape, Y_test.shape)
 print("Validation sequences:", X_val.shape, Y_val.shape)
 
 # Holdout for unsupervised training
-holdout = 0
 if holdout > 0:
+    print("Using holdout of " + str(holdout))
     h_train = int(len(X_train) * holdout)
+    X_unlabeled = X_train[:h_train]
     X_train = X_train[h_train:]
     Y_train = Y_train[h_train:]
 
@@ -131,7 +147,63 @@ model = BigBAT(
     num_layers=num_layers,
     dropout=dropout,
     classifier_dropout=classifier_dropout,
+    squeeze_first=(method == 'BYOL')
 )
+
+preprocessed_shape = preprocess(X_train[0].unsqueeze(0), nfft).shape # (1, 1343, 257)
+
+if method == 'standard':
+    pass
+elif method == 'BYOL':
+    custom_augment_fn = nn.Sequential(
+        RandomApply(T.ColorJitter(0.8, 0.8, 0.8, 0.2), p=0.8),
+        T.RandomHorizontalFlip(),
+        T.RandomVerticalFlip(),
+        RandomApply(T.GaussianBlur((23, 23), (1.5, 1.5)), p=0.3),
+        RandomApply(noise, p=0.5),
+        T.RandomErasing()
+        #T.RandomResizedCrop(preprocessed_shape[1:]) could be used for time shift augmentation
+    )
+
+    byol_model = BYOL(
+        model,
+        image_size = preprocessed_shape,
+        hidden_layer = 'classifier',
+        projection_size = 32,
+        projection_hidden_size = 64,
+        augment_fn = custom_augment_fn
+    )
+    byol_model.to(device)
+elif method == 'FixMatch':
+    augment_s = nn.Sequential(
+        #RandomApply(T.ColorJitter(0.8, 0.8, 0.8, 0.2), p=0.8),
+        T.RandomHorizontalFlip(),
+        T.RandomVerticalFlip(),
+        RandomApply(T.GaussianBlur((23, 23), (1.5, 1.5)), p=0.3),
+        RandomApply(noise, p=0.5),
+        T.RandomErasing()
+        #T.RandomResizedCrop(preprocessed_shape[1:]) could be used for time shift augmentation
+    )
+    
+    augment_w = nn.Sequential(
+        #RandomApply(T.ColorJitter(0.8, 0.8, 0.8, 0.2), p=0.8),
+        #T.RandomHorizontalFlip(),
+        #T.RandomVerticalFlip(),
+        RandomApply(T.GaussianBlur((23, 23), (1.5, 1.5)), p=0.3),
+        RandomApply(noise, p=0.5)
+        #T.RandomErasing()
+        #T.RandomResizedCrop(preprocessed_shape[1:]) could be used for time shift augmentation
+    )
+
+    lambda_u = args.lambda_u
+elif method == 'PseudoLabel':
+    T1 = args.T1
+    T2 = args.T2
+    af = 1
+    alpha_weight = AlphaWeight(T1, T2, af)
+    step = 0
+    every_n = args.every_n
+
 model.to(device)
 
 print("Model loaded!")
@@ -149,12 +221,18 @@ train_loader = DataLoader(train_data, batch_size=batch_size)
 test_loader = DataLoader(test_data, batch_size=batch_size)
 val_loader = DataLoader(val_data, batch_size=batch_size)
 
+unlabeled_len = batch_size * int(len(X_unlabeled) / batch_size)
+unlabeled_data = TensorDataset(X_unlabeled[:unlabeled_len], torch.zeros(unlabeled_len))
+unlabeled_loader = DataLoader(unlabeled_data, batch_size=batch_size)
 print("Created dataloaders!")
 
 # Initialize training
 criterion = AsymmetricLoss(gamma_neg=2, gamma_pos=1, clip=0)
 optimizer = torch.optim.SGD(model.parameters(), lr=lr, momentum=0.9, weight_decay=5e-4, nesterov=True, dampening=0)
-scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(optimizer=optimizer, T_0=warmup_epochs)
+if warmup_epochs > 0:
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(optimizer=optimizer, T_0=warmup_epochs)
+else:
+    scheduler = None
 
 min_val_loss = torch.inf
 
@@ -172,8 +250,9 @@ def train_epoch(model, epoch, criterion, optimizer, scheduler, dataloader, devic
     for batch, (inputs, labels) in enumerate(tqdm(dataloader)):
         # Transfer Data to GPU if available
         inputs, labels = inputs.to(device), labels.to(device)
-        inputs, labels = mixup(inputs, labels, min_seq=1, max_seq=3, p_min=0.3)
-        inputs = preprocess(inputs)
+        if not no_mixup:
+            inputs, labels = mixup(inputs, labels, min_seq=1, max_seq=3, p_min=0.3)
+        inputs = preprocess(inputs, nfft)
          
         # Clear the gradients
         optimizer.zero_grad()
@@ -195,7 +274,8 @@ def train_epoch(model, epoch, criterion, optimizer, scheduler, dataloader, devic
         running_corrects += getCorrects(outputs, labels)
     
         # Perform learning rate step
-        scheduler.step(epoch + batch / num_batches)
+        if scheduler is not None:
+            scheduler.step(epoch + batch / num_batches)
             
     epoch_loss = running_loss / num_samples
     epoch_acc = running_corrects / num_samples
@@ -215,7 +295,8 @@ def test_epoch(model, epoch, criterion, optimizer, dataloader, device):
         for batch, (inputs, labels) in enumerate(tqdm(dataloader)):
             # Transfer Data to GPU if available
             inputs, labels = inputs.to(device), labels.to(device)
-            inputs, labels = mixup(inputs, labels, min_seq=1, max_seq=3)
+            if not no_mixup:
+                inputs, labels = mixup(inputs, labels, min_seq=1, max_seq=3)
             inputs = preprocess(inputs)
 
             # Clear the gradients
@@ -248,7 +329,8 @@ if wandb_project is not None and wandb_entity is not None:
         "dim_feedforward": dim_feedforward,
         "num_layers": num_layers,
         "dropout": dropout,
-        "classifier_dropout": classifier_dropout
+        "classifier_dropout": classifier_dropout,
+        "method": method,
     }
     wandb.init(project=wandb_project, entity=wandb_entity, config=wandb_config)
 
@@ -257,8 +339,17 @@ if wandb_project is not None and wandb_entity is not None:
 for epoch in range(epochs):
     end = time.time()
     print(f"==================== Starting at epoch {epoch} ====================", flush=True)
+
+    if method == 'BYOL':
+        train_loss = byol_train_epoch(byol_model, epoch, criterion, optimizer, scheduler, train_loader, device, no_mixup, nfft)
+        train_acc = 0.0
+    elif method == 'FixMatch':
+        train_loss, train_acc = fixmatch_train_epoch(model, epoch, criterion, optimizer, scheduler, train_loader, unlabeled_loader, device, augment_w, augment_s, no_mixup, lambda_u, nfft)
+    elif method == 'PseudoLabel':
+        train_loss, train_acc, step = pl_train_epoch(model, epoch, criterion, optimizer, scheduler, train_loader, unlabeled_loader, device, step, every_n, no_mixup, alpha_weight, nfft, num_classes)
+    else:
+        train_loss, train_acc = train_epoch(model, epoch, criterion, optimizer, scheduler, train_loader, device)
     
-    train_loss, train_acc = train_epoch(model, epoch, criterion, optimizer, scheduler, train_loader, device)
     print('Training loss: {:.4f} Acc: {:.4f}'.format(train_loss, train_acc), flush=True)
     
     val_loss, val_acc = test_epoch(model, epoch, criterion, optimizer, val_loader, device)
@@ -292,7 +383,7 @@ for r in range(repeats):
     for inputs, labels in tqdm(test_loader):
         inputs, labels = inputs.to(device), labels.to(device)
         inputs, labels = mixup(inputs, labels, min_seq=1, max_seq=3)
-        inputs = preprocess(inputs)
+        inputs = preprocess(inputs, nfft)
 
         output = model(inputs) # Feed Network
         predictions.extend(output.data.cpu().numpy())

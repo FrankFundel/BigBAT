@@ -12,7 +12,7 @@ parser = argparse.ArgumentParser(description='Preparing data.')
 
 parser.add_argument('wav_folder', type=str, help="Path to the wav folder.")
 parser.add_argument('meta_file', type=str, help="Path to the meta file.")
-parser.add_argument('--sample_rate', type=int, help='Desired sample rate.', default=220500)
+parser.add_argument('--sample_rate', type=int, help='Desired sample rate.', default=22050)
 parser.add_argument('--n_fft', type=int, help='Desired number of fft.', default=512)
 parser.add_argument('--output_file', help='Desired filename to write to.', default="prepared.h5")
 
@@ -39,8 +39,8 @@ def mergeClass(name):
     signals = []
     for filename in tqdm(classes[name]):
         y, _ = librosa.load(os.path.join(wav_folder, filename), sr=sample_rate)
-        sig = prepareData(y)
-        signals.append(sig)
+        #y = prepareData(y)
+        signals.append(y)
         
     if len(signals) >= 7:
         X_train, X_test, _, _ = train_test_split(signals, np.zeros(len(signals)), test_size=0.25, random_state=42)

@@ -17,7 +17,8 @@ class BigBAT(nn.Module):
         dim_feedforward=32,
         num_layers=2,
         dropout=0.1,
-        classifier_dropout=0.3
+        classifier_dropout=0.3,
+        squeeze_first=False
     ):
 
         super().__init__()
@@ -46,7 +47,11 @@ class BigBAT(nn.Module):
         
         self.d_model = d_model
 
+        self.squeeze_first = squeeze_first
+
     def forward(self, x):
+        if self.squeeze_first:
+            x = x.squeeze(1)
         x = x.unfold(dimension=1, size=self.patch_len, step=self.patch_skip).transpose(3, 2) # patches
     
         b, n, w, h = x.shape
