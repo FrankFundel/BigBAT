@@ -1,5 +1,9 @@
 # BigBAT
+
+## Overview
 Enhancement on the previous BioAcousticTransformer, including unsupervised pre-training, augmentation, species label smoothing and meta data.
+
+---
 
 # Content
 - ASL.py: AsymmetricLoss Function
@@ -8,21 +12,73 @@ Enhancement on the previous BioAcousticTransformer, including unsupervised pre-t
 - tools.py: functions for dataset loading and preprocessing
 - BigBAT.py: The BigBAT model
 - BigBAT_\[model\].py: The BigBAT model, modified for \[model\]
+- train.py: Simple training script
 
-# Tutorial
+---
 
-1. Data Preparation
-A h5 file with a specific format is necessary for fast dataloading and training.
-You start off with a folder of .wav-files of arbitrary length and a meta.csv with filename and species for each file.
+## 1. Data Preparation
 
-If you start off with a folder with .zc files with the labels which are not inside the meta.csv:
-Run preparation/zcjs/dir_2_meta.js to create a meta_n.csv, where labels are extracted from .zc files (please edit the script accordingly)
+### Prerequisites
+- Audio files in `.wav` format.
+- A metadata file (`meta.csv`) including information about each audio file.
 
-Next, run `preparation/prepare_data.py` (please edit the script accordingly)
-- row["ORGID"]: the species name (comma seperated)
-- row["IN FILE"]: the path to the wav
-The csv is seperated by semicolons and needs those two columns, but you can rename them if you need.
+### Data Preparation Script Arguments
+- `wav_folder`: Path to the folder containing `.wav` files.
+  - **Type**: String
+  - **Description**: Directory where `.wav` files are stored.
+- `meta_file`: Path to the metadata file.
+  - **Type**: String
+  - **Description**: Path to your metadata file (`meta.csv`).
+- `--sample_rate`: Desired sample rate for audio files.
+  - **Type**: Integer
+  - **Default**: 22050
+  - **Description**: Sample rate for audio conversion.
+- `--n_fft`: Number of FFT points.
+  - **Type**: Integer
+  - **Default**: 512
+  - **Description**: FFT points for audio processing.
+- `--output_file`: Filename for the output file.
+  - **Type**: String
+  - **Default**: "prepared.h5"
+  - **Description**: Filename for the processed `.h5` file.
 
-This results in a .h5 file with all recordings concatenated for each class that occurs in meta_n.csv, split into train, test and validation set.
+### Running the Data Preparation Script
+- Configure and run the script to process `.wav` files and metadata into a `.h5` file.
 
-2. Training
+---
+
+## 2. Training
+
+### Training Script Arguments
+- `json_file`: Path to JSON file with class names.
+- `--nfft`: Number of FFT points (default: 512).
+- `--max_len`: Maximum sequence length (default: 60).
+- `--patch_len`: Length of each patch (default: 44).
+- `--patch_skip`: Skip length for patches (default: 22).
+- `--max_seqs`: Maximum number of sequences (optional).
+- `--min_seqs`: Minimum number of sequences (optional).
+- `data_path`: Path to the `.h5` data file.
+- `--holdout`: Data proportion for holdout (0 to 1).
+- `--batch_size`: Batch size (default: 128).
+- `--epochs`: Number of training epochs (default: 15).
+- `--lr`: Learning rate (default: 0.001).
+- `--warmup_epochs`: Warm-up epochs (default: 3).
+- `--wandb_project`: Weights & Biases project name.
+- `--wandb_entity`: Weights & Biases entity name.
+- `--model_filename`: Filename for the saved model (default: 'BigBAT.pth').
+- `--repeats`: Number of repeats for evaluation (default: 5).
+- `--figure_filename`: Filename for saving figures (default: 'confusion_matrix.png').
+- `--method`: Training method (choices: 'standard', 'BYOL', 'FixMatch', 'PseudoLabel').
+- `--T1`: Epoch to introduce unlabeled data.
+- `--T2`: Epoch to unintroduce unlabeled data.
+- `--every_n`: Frequency for using unlabeled data in batches.
+- `--no_mixup`: Flag to disable mixup.
+- `--lambda_u`: Weight of unlabeled loss in FixMatch.
+
+### Running the Training Script
+- Set the arguments based on your dataset and requirements.
+- Execute the training script to train your model.
+- Monitor progress through console logs and optional Weights & Biases integration.
+
+### Output
+- A trained model (`BigBAT.pth`).
