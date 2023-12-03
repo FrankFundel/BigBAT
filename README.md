@@ -82,3 +82,13 @@ Enhancement on the previous BioAcousticTransformer, including unsupervised pre-t
 
 ### Output
 - A trained model (`BigBAT.pth`).
+
+### Explanation of some variables
+
+The .unfold (in BigBAT.py) creates overtlapping patches from the recordings, where max_len is the maximum length of a sequence (number of patches), patch_len is the length of a single patch in a sequence (number of t-pixels in spectrogram patch), patch_skip is how many t-pixels are skipped to create the overlap (50%).
+The shape of a batch-tensor is then: (B, 60, 44, 257), where 257 are the number of f-pixels in a spectrogram. f-pixels referring to pixels in the frequency axis, and t-pixels referring to pixels in the time axis e.g. a spectrogram could be auf shape (1024, 257), so (num t-pixels, num f-pixels).
+For a 3s window, sample rate 22050 and nfft=1024, the parameters would be:
+max_len = [choose by yourself, maybe 90s = 30 patches of 3s] = 30
+patch_len = 3s * 22050 samples/s = 66150 samples / hop_length = num t-pixels in patch e.g. 128 for hop_length=512
+patch_skip = patch_len/2 = 128 / 2 = 64
+The hop_length is a parameter of your FFT-Algorithm, usually 512. You can play with these parameters if you want.
